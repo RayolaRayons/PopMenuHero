@@ -2,9 +2,9 @@ City of Heroes PopMenu Editor
 ==============================
 
 FILES:
-  popmenu_editor.py  - Main GUI application
+  popmenuHero.py  - Main GUI application
   mnu_parser.py      - Parser/writer library for .mnu files
-  SampleMenu.mnu     - Sample menu file for testing
+
 
 REQUIREMENTS:
   Python 3.9+
@@ -14,8 +14,8 @@ INSTALL:
   pip install PyQt6
 
 RUN:
-  python popmenu_editor.py
-  python popmenu_editor.py SampleMenu.mnu    (open a file directly)
+  python popmenuHero.py
+  python popmenuHero.py SampleMenu.mnu    (open a file directly)
 
 FEATURES:
   - Open/Save .mnu files
