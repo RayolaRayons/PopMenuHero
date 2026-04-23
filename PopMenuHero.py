@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QFileDialog, QMessageBox, QToolBar, QFrame, QScrollArea,
     QSizePolicy, QGroupBox, QCheckBox, QStyledItemDelegate, QStyle, QMenu
 )
-from PyQt6.QtCore import Qt, QMimeData, QByteArray, QRectF, QSize
+from PyQt6.QtCore import Qt, QMimeData, QByteArray, QRectF, QSize, pyqtSignal
 from PyQt6.QtGui import QAction, QFont, QColor, QIcon, QDrag, QTextDocument
 
 from mnu_parser import (
@@ -149,6 +149,7 @@ class HotkeyDelegate(QStyledItemDelegate):
 
 class PopMenuTree(QTreeWidget):
     """Tree widget with drag-and-drop that enforces menu-only nesting rules."""
+    about_to_drop = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -184,6 +185,7 @@ class PopMenuTree(QTreeWidget):
 
     def dropEvent(self, event):
         """Override to enforce: only Menu items can have children."""
+        self.about_to_drop.emit()
         target_item = self.itemAt(event.position().toPoint())
         drop_indicator = self.dropIndicatorPosition()
 
@@ -541,6 +543,8 @@ class PropertyPanel(QWidget):
 
         # Notify parent that document changed
         main = self.window()
+        if hasattr(main, '_on_field_edit'):
+            main._on_field_edit()
         if hasattr(main, 'mark_modified'):
             main.mark_modified()
 
@@ -552,6 +556,8 @@ class MainWindow(QMainWindow):
         self.setGeometry(100, 100, 1100, 700)
         self.current_file = None
         self.modified = False
+        self._undo_stack = []        # list of serialized states, newest last
+        self._field_session_active = False  # True while editing fields on the current item
 
         self.config = configparser.ConfigParser()
         self.config_path = self._get_config_path()
@@ -632,6 +638,7 @@ class MainWindow(QMainWindow):
         self.tree = PopMenuTree()
         self.tree.itemSelectionChanged.connect(self._on_selection_changed)
         self.tree.customContextMenuRequested.connect(self._show_tree_context_menu)
+        self.tree.about_to_drop.connect(self._push_undo_snapshot)
         self.tree.model().rowsInserted.connect(self._on_tree_changed)
         self.tree.model().rowsMoved.connect(self._on_tree_changed)
         self.tree.model().rowsRemoved.connect(self._on_tree_changed)
@@ -700,6 +707,10 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self._action("E&xit", self.close, "Alt+F4"))
 
         edit_menu = mb.addMenu("&Edit")
+        self._undo_action = self._action("↩ &Undo", self._undo, "Ctrl+Z")
+        self._undo_action.setEnabled(False)
+        edit_menu.addAction(self._undo_action)
+        edit_menu.addSeparator()
         edit_menu.addAction(self._action("&Delete Selected", self._delete_selected, "Delete"))
         edit_menu.addSeparator()
         edit_menu.addAction(self._action("Expand &All", self.tree.expandAll))
@@ -719,6 +730,7 @@ class MainWindow(QMainWindow):
         tb.addAction(self._action("🆕 New", self._new_file))
         tb.addAction(self._action("📂 Open", self._open_file))
         tb.addAction(self._action("💾 Save", self._save_file))
+        tb.addAction(self._undo_action)
         tb.addSeparator()
         tb.addAction(self._action("⊞ Expand All", self.tree.expandAll))
         tb.addAction(self._action("⊡ Collapse to Root", self._collapse_to_root))
@@ -814,6 +826,7 @@ class MainWindow(QMainWindow):
     # --- Selections ---
 
     def _on_selection_changed(self):
+        self._field_session_active = False
         items = self.tree.selectedItems()
         if items:
             self.prop_panel.load_node(items[0])
@@ -865,7 +878,50 @@ class MainWindow(QMainWindow):
         idx = parent.indexOfChild(sel)
         return parent, idx + 1
 
+    # --- Undo ---
+
+    def _push_undo_snapshot(self):
+        text = MnuWriter().write(self._tree_to_mnu())
+        self._undo_stack.append(text)
+        if len(self._undo_stack) > 10:
+            self._undo_stack.pop(0)
+        self._update_undo_action()
+
+    def _undo(self):
+        if not self._undo_stack:
+            return
+        text = self._undo_stack.pop()
+        mnu = MnuParser().parse(text)
+        self._build_tree_from_mnu(mnu)
+        self._field_session_active = False
+        self.prop_panel.clear()
+        self.mark_modified()
+        self._update_undo_action()
+
+    def _update_undo_action(self):
+        count = len(self._undo_stack)
+        self._undo_action.setEnabled(count > 0)
+        if count:
+            self._undo_action.setToolTip(
+                f"Undo ({count} step{'s' if count != 1 else ''} available)"
+            )
+        else:
+            self._undo_action.setToolTip("Nothing to undo")
+
+    def _on_field_edit(self):
+        """Called by PropertyPanel on the first field change per selection session."""
+        if not self._field_session_active:
+            self._push_undo_snapshot()
+            self._field_session_active = True
+
+    # --- Insert element ---
+
     def _insert_node(self, node: MnuNode):
+        self._push_undo_snapshot()
+        self._insert_node_inner(node)
+        self._field_session_active = True
+
+    def _insert_node_inner(self, node: MnuNode):
         # --- Root-level Comment: only go to root if selection is root-level or empty ---
         if isinstance(node, Comment):
             sel = self.tree.selectedItems()
@@ -993,6 +1049,8 @@ class MainWindow(QMainWindow):
         items = self.tree.selectedItems()
         if not items:
             return
+        self._push_undo_snapshot()
+        self._field_session_active = False
         item = items[0]
         node = item.data(0, Qt.ItemDataRole.UserRole)
         # Only confirm when deleting the root Menu (would remove all children too)
@@ -1016,6 +1074,9 @@ class MainWindow(QMainWindow):
     def _new_file(self):
         if not self._confirm_discard():
             return
+        self._undo_stack.clear()
+        self._field_session_active = False
+        self._update_undo_action()
         self.tree.clear()
         self.prop_panel.clear()
         self.current_file = None
@@ -1043,6 +1104,9 @@ class MainWindow(QMainWindow):
             self._build_tree_from_mnu(mnu)
             self.current_file = path
             self.modified = False
+            self._undo_stack.clear()
+            self._field_session_active = False
+            self._update_undo_action()
             self._update_title()
         except Exception as e:
             QMessageBox.critical(self, "Error Opening File", str(e))
@@ -1109,10 +1173,28 @@ class MainWindow(QMainWindow):
             event.ignore()
 
 
+def _resource_path(filename: str) -> Path:
+    """Return the path to a bundled resource, works both frozen and from source."""
+    if getattr(sys, 'frozen', False):
+        base = Path(sys._MEIPASS)
+    else:
+        base = Path(__file__).parent
+    return base / filename
+
+
 def main():
+    # Tell Windows this is a distinct app so the taskbar shows our icon, not python.exe's
+    if sys.platform == 'win32':
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('PopMenuHero.App')
+
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setApplicationName("CoH PopMenu Hero")
+
+    icon_path = _resource_path('PopMenuHero.ico')
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
 
     window = MainWindow()
     window.show()
@@ -1126,6 +1208,9 @@ def main():
                 window._build_tree_from_mnu(mnu)
                 window.current_file = path
                 window.modified = False
+                window._undo_stack.clear()
+                window._field_session_active = False
+                window._update_undo_action()
                 window._update_title()
             except Exception as e:
                 QMessageBox.critical(window, "Error", str(e))
