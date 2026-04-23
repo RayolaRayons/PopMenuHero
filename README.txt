@@ -14,8 +14,8 @@ INSTALL:
   pip install PyQt6
 
 RUN:
-  python popmenu_editor.py
-  python popmenu_editor.py SampleMenu.mnu    (open a file directly)
+  python popmenuHero.py
+  python popmenuHero.py SampleMenu.mnu    (open a file directly)
 
 FEATURES:
   - Open/Save .mnu files
