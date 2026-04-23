@@ -5,6 +5,8 @@ A graphical editor for .mnu files with drag-and-drop tree view and property pane
 
 import sys
 import os
+import configparser
+from pathlib import Path
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QTreeWidget, QTreeWidgetItem,
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit,
@@ -12,7 +14,7 @@ from PyQt6.QtWidgets import (
     QFileDialog, QMessageBox, QToolBar, QFrame, QScrollArea,
     QSizePolicy, QGroupBox, QCheckBox, QStyledItemDelegate, QStyle
 )
-from PyQt6.QtCore import Qt, QMimeData, QByteArray, QRectF
+from PyQt6.QtCore import Qt, QMimeData, QByteArray, QRectF, QSize
 from PyQt6.QtGui import QAction, QFont, QColor, QIcon, QDrag, QTextDocument
 
 from mnu_parser import (
@@ -66,7 +68,7 @@ def node_label(node: MnuNode) -> str:
     elif isinstance(node, Divider):
         return "──────────────────────────"
     elif isinstance(node, Comment):
-        return f"💬 {node.text[:50]}{'…' if len(node.text) > 50 else ''}"
+        return f"💬 {node.text[:100]}{'…' if len(node.text) > 100 else ''}"
     return "?"
 
 
@@ -271,6 +273,86 @@ class PropertyPanel(QWidget):
             }
         """)
 
+    def _create_icon_field(self):
+        """Create a widget with line edit and help button for icon field."""
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        line_edit = QLineEdit()
+        line_edit.textChanged.connect(self._on_field_changed)
+        layout.addWidget(line_edit)
+
+        help_btn = QPushButton("?")
+        help_btn.setFixedSize(24, 24)
+        help_btn.setToolTip("Open icon reference")
+        help_btn.clicked.connect(self._open_icon_help)
+        layout.addWidget(help_btn)
+
+        # Store reference to line edit for later access
+        widget.line_edit = line_edit
+        return widget
+
+    def _open_icon_help(self):
+        """Open the icon help webpage."""
+        import webbrowser
+        webbrowser.open("https://homecoming.wiki/wiki/Macro_image_(Slash_Command)")
+
+    def _create_badge_field(self):
+        """Create a widget with line edit and help button for badge field."""
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        line_edit = QLineEdit()
+        line_edit.setPlaceholderText("Space-separated badge list")
+        line_edit.textChanged.connect(self._on_field_changed)
+        layout.addWidget(line_edit)
+
+        help_btn = QPushButton("?")
+        help_btn.setFixedSize(24, 24)
+        help_btn.setToolTip("Open badge reference")
+        help_btn.clicked.connect(self._open_badge_help)
+        layout.addWidget(help_btn)
+
+        # Store reference to line edit for later access
+        widget.line_edit = line_edit
+        return widget
+
+    def _create_power_field(self, type_):
+        """Create a widget with line edit and help button for power fields."""
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        line_edit = QLineEdit()
+        line_edit.setPlaceholderText("Power name")
+        line_edit.textChanged.connect(self._on_field_changed)
+        layout.addWidget(line_edit)
+
+        help_btn = QPushButton("?")
+        help_btn.setFixedSize(24, 24)
+        help_btn.setToolTip("Open power reference")
+        help_btn.clicked.connect(lambda: self._open_power_help())
+        layout.addWidget(help_btn)
+
+        # Store reference to line edit for later access
+        widget.line_edit = line_edit
+        return widget
+
+    def _open_badge_help(self):
+        """Open the badge help webpage."""
+        import webbrowser
+        webbrowser.open("https://homecoming.wiki/wiki/Badges")
+
+    def _open_power_help(self):
+        """Open the power help webpage."""
+        import webbrowser
+        webbrowser.open("https://cod.uberguy.net")
+
     def _build_all_fields(self):
         """Build field widgets for all node types."""
         fl = self.form_layout
@@ -299,21 +381,17 @@ class PropertyPanel(QWidget):
         self._fields['comment_text'].textChanged.connect(self._on_field_changed)
 
         # LockedOption extras
-        self._fields['icon'] = QLineEdit()
-        self._fields['icon'].setPlaceholderText("Icon name (optional)")
-        self._fields['icon'].textChanged.connect(self._on_field_changed)
+        self._fields['icon'] = self._create_icon_field()
+        # Note: textChanged connect will be on the line edit inside
 
-        self._fields['badge'] = QLineEdit()
-        self._fields['badge'].setPlaceholderText("Space-separated badge list")
-        self._fields['badge'].textChanged.connect(self._on_field_changed)
+        self._fields['badge'] = self._create_badge_field()
+        # Note: textChanged connect will be on the line edit inside
 
-        self._fields['power_ready'] = QLineEdit()
-        self._fields['power_ready'].setPlaceholderText("Power name")
-        self._fields['power_ready'].textChanged.connect(self._on_field_changed)
+        self._fields['power_ready'] = self._create_power_field("ready")
+        # Note: textChanged connect will be on the line edit inside
 
-        self._fields['power_owned'] = QLineEdit()
-        self._fields['power_owned'].setPlaceholderText("Power name")
-        self._fields['power_owned'].textChanged.connect(self._on_field_changed)
+        self._fields['power_owned'] = self._create_power_field("owned")
+        # Note: textChanged connect will be on the line edit inside
 
         # Deprecated (read-only display)
         self._fields['authbit'] = QLineEdit()
@@ -401,10 +479,10 @@ class PropertyPanel(QWidget):
             self._show_fields(*fields)
             self._fields['display_name'].setText(node.display_name)
             self._fields['command'].setPlainText(node.command)
-            self._fields['icon'].setText(node.icon)
-            self._fields['badge'].setText(node.badge)
-            self._fields['power_ready'].setText(node.power_ready)
-            self._fields['power_owned'].setText(node.power_owned)
+            self._fields['icon'].line_edit.setText(node.icon)
+            self._fields['badge'].line_edit.setText(node.badge)
+            self._fields['power_ready'].line_edit.setText(node.power_ready)
+            self._fields['power_owned'].line_edit.setText(node.power_owned)
             self._fields['authbit'].setText(node.authbit)
             self._fields['reward_token'].setText(node.reward_token)
             self._fields['store_product'].setText(node.store_product)
@@ -445,10 +523,10 @@ class PropertyPanel(QWidget):
         elif isinstance(node, LockedOption):
             node.display_name = self._fields['display_name'].text()
             node.command = self._fields['command'].toPlainText()
-            node.icon = self._fields['icon'].text()
-            node.badge = self._fields['badge'].text()
-            node.power_ready = self._fields['power_ready'].text()
-            node.power_owned = self._fields['power_owned'].text()
+            node.icon = self._fields['icon'].line_edit.text()
+            node.badge = self._fields['badge'].line_edit.text()
+            node.power_ready = self._fields['power_ready'].line_edit.text()
+            node.power_owned = self._fields['power_owned'].line_edit.text()
             node.authbit = self._fields['authbit'].text()
             node.reward_token = self._fields['reward_token'].text()
             node.store_product = self._fields['store_product'].text()
@@ -474,9 +552,67 @@ class MainWindow(QMainWindow):
         self.current_file = None
         self.modified = False
 
+        self.config = configparser.ConfigParser()
+        self.config_path = self._get_config_path()
+        self._load_config()
+
+        game_dir = self.config.get('DEFAULT', 'game_directory', fallback='')
+        if game_dir:
+            self._check_menus_directory(game_dir)
+
         self._build_ui()
         self._build_menu_bar()
         self._build_toolbar()
+
+    def _get_config_path(self):
+        if getattr(sys, 'frozen', False):
+            # Running as compiled exe
+            exe_dir = Path(sys.executable).parent
+        else:
+            # Running as script
+            exe_dir = Path(__file__).parent
+        return exe_dir / 'config.ini'
+
+    def _load_config(self):
+        if self.config_path.exists():
+            self.config.read(self.config_path)
+
+    def _save_config(self):
+        with open(self.config_path, 'w') as f:
+            self.config.write(f)
+
+    def _set_game_directory(self):
+        current = self.config.get('DEFAULT', 'game_directory', fallback='')
+        path = QFileDialog.getExistingDirectory(self, "Select City of Heroes Game Directory", current)
+        if path:
+            if 'DEFAULT' not in self.config:
+                self.config.add_section('DEFAULT')
+            self.config.set('DEFAULT', 'game_directory', path)
+            self._save_config()
+            self._check_menus_directory(path)
+
+    def _check_menus_directory(self, game_dir):
+        menus_dir = Path(game_dir) / 'data' / 'texts' / 'English' / 'menus'
+        if menus_dir.exists():
+            return  # Already exists
+        reply = QMessageBox.question(
+            self, "Create Menus Directory",
+            f"The menus directory does not exist:\n{menus_dir}\n\nCreate it?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                menus_dir.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to create directory: {e}")
+
+    def _get_default_directory(self):
+        game_dir = self.config.get('DEFAULT', 'game_directory', fallback='')
+        if game_dir:
+            menus_dir = Path(game_dir) / 'data' / 'texts' / 'English' / 'menus'
+            if menus_dir.exists():
+                return str(menus_dir)
+        return ""
 
     def _build_ui(self):
         central = QWidget()
@@ -557,6 +693,8 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self._action("&Save", self._save_file, "Ctrl+S"))
         file_menu.addAction(self._action("Save &As...", self._save_file_as, "Ctrl+Shift+S"))
         file_menu.addSeparator()
+        file_menu.addAction(self._action("Set &Game Directory...", self._set_game_directory))
+        file_menu.addSeparator()
         file_menu.addAction(self._action("E&xit", self.close, "Alt+F4"))
 
         edit_menu = mb.addMenu("&Edit")
@@ -578,7 +716,19 @@ class MainWindow(QMainWindow):
         tb.addAction(self._action("💾 Save", self._save_file))
         tb.addSeparator()
         tb.addAction(self._action("⊞ Expand All", self.tree.expandAll))
+        tb.addAction(self._action("⊡ Collapse to Root", self._collapse_to_root))
         tb.addAction(self._action("⊟ Collapse All", self.tree.collapseAll))
+
+    def _collapse_to_root(self):
+        """Collapse all items but keep the root menu expanded."""
+        self.tree.collapseAll()
+        # Find and expand the root menu
+        for i in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(i)
+            node = item.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(node, Menu):
+                item.setExpanded(True)
+                break
 
     def _action(self, label, slot, shortcut=None):
         a = QAction(label, self)
@@ -838,8 +988,9 @@ class MainWindow(QMainWindow):
     def _open_file(self):
         if not self._confirm_discard():
             return
+        default_dir = self._get_default_directory()
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open PopMenu File", "",
+            self, "Open PopMenu File", default_dir,
             "PopMenu Files (*.mnu);;All Files (*.*)"
         )
         if not path:
@@ -867,6 +1018,11 @@ class MainWindow(QMainWindow):
             if isinstance(node, Menu):
                 suggestion = node.name + ".mnu"
                 break
+        default_dir = self._get_default_directory()
+        if default_dir and suggestion:
+            suggestion = str(Path(default_dir) / suggestion)
+        elif default_dir:
+            suggestion = default_dir
         path, _ = QFileDialog.getSaveFileName(
             self, "Save PopMenu File", suggestion,
             "PopMenu Files (*.mnu);;All Files (*.*)"
