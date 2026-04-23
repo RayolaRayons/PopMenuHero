@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit,
     QTextEdit, QLabel, QSplitter, QPushButton, QComboBox,
     QFileDialog, QMessageBox, QToolBar, QFrame, QScrollArea,
-    QSizePolicy, QGroupBox, QCheckBox, QStyledItemDelegate, QStyle
+    QSizePolicy, QGroupBox, QCheckBox, QStyledItemDelegate, QStyle, QMenu
 )
 from PyQt6.QtCore import Qt, QMimeData, QByteArray, QRectF, QSize
 from PyQt6.QtGui import QAction, QFont, QColor, QIcon, QDrag, QTextDocument
@@ -163,6 +163,7 @@ class PopMenuTree(QTreeWidget):
         self.setFont(QFont("Segoe UI", 10))
         self.setMinimumWidth(300)
         self.setItemDelegate(HotkeyDelegate(self))
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.setStyleSheet("""
             QTreeWidget {
                 border: 1px solid #ccc;
@@ -630,6 +631,7 @@ class MainWindow(QMainWindow):
 
         self.tree = PopMenuTree()
         self.tree.itemSelectionChanged.connect(self._on_selection_changed)
+        self.tree.customContextMenuRequested.connect(self._show_tree_context_menu)
         self.tree.model().rowsInserted.connect(self._on_tree_changed)
         self.tree.model().rowsMoved.connect(self._on_tree_changed)
         self.tree.model().rowsRemoved.connect(self._on_tree_changed)
@@ -702,6 +704,9 @@ class MainWindow(QMainWindow):
         edit_menu.addSeparator()
         edit_menu.addAction(self._action("Expand &All", self.tree.expandAll))
         edit_menu.addAction(self._action("&Collapse All", self.tree.collapseAll))
+
+        import_menu = mb.addMenu("&Import")
+        import_menu.addAction(self._action("&Import Menu from File...", self._import_menu, "Ctrl+I"))
 
     def _build_toolbar(self):
         tb = self.addToolBar("Main")
@@ -945,6 +950,44 @@ class MainWindow(QMainWindow):
 
     def _add_comment(self):
         self._insert_node(Comment(text="New comment"))
+
+    def _show_tree_context_menu(self, pos):
+        menu = QMenu(self)
+
+        add_menu = menu.addMenu("Add")
+        add_menu.addAction("Menu",          self._add_menu)
+        add_menu.addAction("Option",        self._add_option)
+        add_menu.addAction("Locked Option", self._add_locked_option)
+        add_menu.addAction("Title",         self._add_title)
+        add_menu.addAction("Divider",       self._add_divider)
+        add_menu.addAction("Comment",       self._add_comment)
+
+        menu.addSeparator()
+
+        delete_action = menu.addAction("Delete Selected", self._delete_selected)
+        delete_action.setEnabled(bool(self.tree.selectedItems()))
+
+        menu.exec(self.tree.viewport().mapToGlobal(pos))
+
+    def _import_menu(self):
+        """Open another .mnu file and insert its root menu as a submenu here."""
+        default_dir = self._get_default_directory()
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import Menu from File", default_dir,
+            "PopMenu Files (*.mnu);;All Files (*.*)"
+        )
+        if not path:
+            return
+        try:
+            mnu = parse_file(path)
+        except Exception as e:
+            QMessageBox.critical(self, "Import Error", f"Failed to read file:\n{e}")
+            return
+        if not mnu.root_menu:
+            QMessageBox.warning(self, "Import Error",
+                "The selected file has no root menu to import.")
+            return
+        self._insert_node(mnu.root_menu)
 
     def _delete_selected(self):
         items = self.tree.selectedItems()
