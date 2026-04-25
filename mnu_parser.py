@@ -37,6 +37,14 @@ class Title(MnuNode):
 
 
 @dataclass
+class Text(MnuNode):
+    text: str
+
+    def __repr__(self):
+        return f"Text({self.text!r})"
+
+
+@dataclass
 class Option(MnuNode):
     display_name: str
     command: str
@@ -53,6 +61,8 @@ class LockedOption(MnuNode):
     badge: str = ""           # space-separated list
     power_ready: str = ""
     power_owned: str = ""
+    requires: str = ""
+    visible_requires: str = ""
     authbit: str = ""         # deprecated
     reward_token: str = ""    # deprecated
     store_product: str = ""   # deprecated
@@ -62,9 +72,20 @@ class LockedOption(MnuNode):
 
 
 @dataclass
+class Dialog(MnuNode):
+    display_name: str = ""
+    command: str = ""
+
+    def __repr__(self):
+        return f"Dialog({self.display_name!r})"
+
+
+@dataclass
 class Menu(MnuNode):
     name: str
     children: List[MnuNode] = field(default_factory=list)
+    requires: str = ""
+    visible_requires: str = ""
 
     def __repr__(self):
         return f"Menu({self.name!r}, [{len(self.children)} children])"
@@ -74,7 +95,7 @@ class Menu(MnuNode):
 class MnuFile:
     """Represents a parsed .mnu file."""
     root_comments: List[Comment] = field(default_factory=list)
-    root_menu: Optional[Menu] = None
+    root_menus: List[Menu] = field(default_factory=list)
 
 
 # --- Tokenizer / Lexer ---
@@ -169,10 +190,10 @@ class MnuParser:
                 # Peek for the root Menu
                 root_menu = self._try_parse_root_menu(title_node)
                 if root_menu:
-                    result.root_menu = root_menu
+                    result.root_menus.append(root_menu)
                 # else title is orphaned - just ignore
             elif kw == 'MENU':
-                result.root_menu = self._parse_menu(tokens)
+                result.root_menus.append(self._parse_menu(tokens))
             else:
                 # Unknown top-level token
                 self._pos += 1
@@ -231,6 +252,16 @@ class MnuParser:
                 text = _unquote(tokens[1]) if len(tokens) > 1 else ""
                 menu.children.append(Title(text))
                 self._pos += 1
+            elif kw == 'TEXT':
+                text = _unquote(tokens[1]) if len(tokens) > 1 else ""
+                menu.children.append(Text(text))
+                self._pos += 1
+            elif kw == 'REQUIRES':
+                menu.requires = line[len(tokens[0]):].strip()
+                self._pos += 1
+            elif kw == 'VISIBLEREQUIRES':
+                menu.visible_requires = line[len(tokens[0]):].strip()
+                self._pos += 1
             elif kw == 'OPTION':
                 dn = _unquote(tokens[1]) if len(tokens) > 1 else ""
                 cmd = _unquote(tokens[2]) if len(tokens) > 2 else ""
@@ -238,6 +269,11 @@ class MnuParser:
                 self._pos += 1
             elif kw == 'LOCKEDOPTION':
                 menu.children.append(self._parse_locked_option())
+            elif kw == 'DIALOG':
+                dn = _unquote(tokens[1]) if len(tokens) > 1 else ""
+                cmd = _unquote(tokens[2]) if len(tokens) > 2 else ""
+                menu.children.append(Dialog(display_name=dn, command=cmd))
+                self._pos += 1
             elif kw == 'MENU':
                 menu.children.append(self._parse_menu(tokens))
             else:
@@ -297,6 +333,12 @@ class MnuParser:
             elif kw == 'POWEROWNED':
                 lo.power_owned = tokens[1] if len(tokens) > 1 else ""
                 self._pos += 1
+            elif kw == 'REQUIRES':
+                lo.requires = line[len(tokens[0]):].strip()
+                self._pos += 1
+            elif kw == 'VISIBLEREQUIRES':
+                lo.visible_requires = line[len(tokens[0]):].strip()
+                self._pos += 1
             elif kw == 'AUTHBIT':
                 lo.authbit = tokens[1] if len(tokens) > 1 else ""
                 self._pos += 1
@@ -329,10 +371,9 @@ class MnuWriter:
         for comment in mnu_file.root_comments:
             lines.append(f"// {comment.text}")
 
-        # Always ensure a blank line before the root menu (required by spec)
-        if mnu_file.root_menu:
+        for menu in mnu_file.root_menus:
             lines.append("")
-            lines.extend(self._write_menu(mnu_file.root_menu, indent=0))
+            lines.extend(self._write_menu(menu, indent=0))
 
         return "\n".join(lines) + "\n"
 
@@ -344,8 +385,13 @@ class MnuWriter:
         # Per spec: Title just before root Menu gets written INSIDE the menu.
         # We just write it as the first child (no hoisting on write).
 
+        inner = "\t" * (indent + 1)
         lines.append(f'{tab}Menu {_quote_value(menu.name)}')
         lines.append(f'{tab}{{')
+        if menu.requires:
+            lines.append(f'{inner}Requires {menu.requires}')
+        if menu.visible_requires:
+            lines.append(f'{inner}VisibleRequires {menu.visible_requires}')
         for child in menu.children:
             lines.extend(self._write_node(child, indent + 1))
         lines.append(f'{tab}}}')
@@ -359,10 +405,14 @@ class MnuWriter:
             return [f'{tab}DIVIDER']
         elif isinstance(node, Title):
             return [f'{tab}Title {_quote_value(node.text)}']
+        elif isinstance(node, Text):
+            return [f'{tab}Text {_quote_value(node.text)}']
         elif isinstance(node, Option):
             return [f'{tab}Option {_quote_value(node.display_name)} {_quote_value(node.command)}']
         elif isinstance(node, LockedOption):
             return self._write_locked_option(node, indent)
+        elif isinstance(node, Dialog):
+            return [f'{tab}Dialog {_quote_value(node.display_name)} {_quote_value(node.command)}']
         elif isinstance(node, Menu):
             return self._write_menu(node, indent)
         return []
@@ -381,6 +431,10 @@ class MnuWriter:
             lines.append(f'{inner}PowerReady {lo.power_ready}')
         if lo.power_owned:
             lines.append(f'{inner}PowerOwned {lo.power_owned}')
+        if lo.requires:
+            lines.append(f'{inner}Requires {lo.requires}')
+        if lo.visible_requires:
+            lines.append(f'{inner}VisibleRequires {lo.visible_requires}')
         # Deprecated but preserved if present
         if lo.authbit:
             lines.append(f'{inner}Authbit {lo.authbit}')

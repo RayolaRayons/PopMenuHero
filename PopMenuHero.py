@@ -18,8 +18,8 @@ from PyQt6.QtCore import Qt, QMimeData, QByteArray, QRectF, QSize, pyqtSignal
 from PyQt6.QtGui import QAction, QFont, QColor, QIcon, QDrag, QTextDocument
 
 from mnu_parser import (
-    MnuFile, MnuNode, Menu, Option, LockedOption,
-    Title, Divider, Comment, MnuParser, MnuWriter,
+    MnuFile, MnuNode, Menu, Option, LockedOption, Dialog,
+    Title, Text, Divider, Comment, MnuParser, MnuWriter,
     parse_file, write_file
 )
 
@@ -28,7 +28,9 @@ ICON_MAP = {
     'Menu':         '📁',
     'Option':       '▶',
     'LockedOption': '🔒',
+    'Dialog':       '💬',
     'Title':        '📝',
+    'Text':         '📄',
     'Divider':      '─',
     'Comment':      '💬',
 }
@@ -37,7 +39,9 @@ NODE_COLORS = {
     'Menu':         QColor('#1e3a5f'),
     'Option':       QColor('#1a3a1a'),
     'LockedOption': QColor('#3a1a1a'),
+    'Dialog':       QColor('#3a2a00'),
     'Title':        QColor('#2a2a00'),
+    'Text':         QColor('#1a3a2a'),
     'Divider':      QColor('#2a2a2a'),
     'Comment':      QColor('#1a1a2e'),
 }
@@ -46,7 +50,9 @@ BG_COLORS = {
     'Menu':         QColor('#dceeff'),
     'Option':       QColor('#dcffdc'),
     'LockedOption': QColor('#ffdcdc'),
+    'Dialog':       QColor('#fff0cc'),
     'Title':        QColor('#ffffd0'),
+    'Text':         QColor('#dcfff0'),
     'Divider':      QColor('#ebebeb'),
     'Comment':      QColor('#e8e8f0'),
 }
@@ -63,8 +69,12 @@ def node_label(node: MnuNode) -> str:
         return f"▶ {node.display_name}"
     elif isinstance(node, LockedOption):
         return f"🔒 {node.display_name or '(no name)'}"
+    elif isinstance(node, Dialog):
+        return f"💬 {node.display_name or '(no name)'}"
     elif isinstance(node, Title):
         return f"📝 {node.text}"
+    elif isinstance(node, Text):
+        return f"📄 {node.text}"
     elif isinstance(node, Divider):
         return "──────────────────────────"
     elif isinstance(node, Comment):
@@ -245,18 +255,24 @@ class PropertyPanel(QWidget):
         layout.addWidget(scroll)
 
         self.form_container = QWidget()
-        self.form_layout = QFormLayout(self.form_container)
+        _container_vbox = QVBoxLayout(self.form_container)
+        _container_vbox.setContentsMargins(0, 0, 0, 0)
+        _container_vbox.setSpacing(0)
+
+        _form_widget = QWidget()
+        self.form_layout = QFormLayout(_form_widget)
         self.form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         self.form_layout.setSpacing(8)
+        _container_vbox.addWidget(_form_widget)
+        _container_vbox.addStretch()
+
         scroll.setWidget(self.form_container)
 
         # Pre-create all possible fields
         self._fields = {}
         self._build_all_fields()
 
-        layout.addStretch()
         self.setMinimumWidth(280)
-        self.setMaximumWidth(420)
 
         self.setStyleSheet("""
             QWidget { background: #f5f5f5; }
@@ -279,6 +295,7 @@ class PropertyPanel(QWidget):
     def _create_icon_field(self):
         """Create a widget with line edit and help button for icon field."""
         widget = QWidget()
+        widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
@@ -305,6 +322,7 @@ class PropertyPanel(QWidget):
     def _create_badge_field(self):
         """Create a widget with line edit and help button for badge field."""
         widget = QWidget()
+        widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
@@ -327,6 +345,7 @@ class PropertyPanel(QWidget):
     def _create_power_field(self, type_):
         """Create a widget with line edit and help button for power fields."""
         widget = QWidget()
+        widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
@@ -375,7 +394,7 @@ class PropertyPanel(QWidget):
         self._fields['command'].textChanged.connect(self._on_field_changed)
 
         self._fields['text'] = QLineEdit()
-        self._fields['text'].setPlaceholderText("Title text")
+        self._fields['text'].setPlaceholderText("Display Title")
         self._fields['text'].textChanged.connect(self._on_field_changed)
 
         self._fields['comment_text'] = QTextEdit()
@@ -396,6 +415,56 @@ class PropertyPanel(QWidget):
         self._fields['power_owned'] = self._create_power_field("owned")
         # Note: textChanged connect will be on the line edit inside
 
+        _sep = QWidget()
+        _sep.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        _sep_layout = QVBoxLayout(_sep)
+        _sep_layout.setContentsMargins(0, 8, 0, 2)
+        _sep_layout.setSpacing(3)
+        _sep_line = QFrame()
+        _sep_line.setFrameShape(QFrame.Shape.HLine)
+        _sep_line.setStyleSheet("color: #bbb;")
+        _sep_layout.addWidget(_sep_line)
+        _sep_lbl = QLabel("⚠  Undocumented features")
+        _sep_lbl.setStyleSheet("color: #999; font-style: italic; font-size: 8pt;")
+        _sep_layout.addWidget(_sep_lbl)
+        self._fields['sep_undocumented'] = _sep
+
+        _sep_text = QWidget()
+        _sep_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        _sep_text_layout = QVBoxLayout(_sep_text)
+        _sep_text_layout.setContentsMargins(0, 8, 0, 2)
+        _sep_text_layout.setSpacing(3)
+        _sep_text_line = QFrame()
+        _sep_text_line.setFrameShape(QFrame.Shape.HLine)
+        _sep_text_line.setStyleSheet("color: #bbb;")
+        _sep_text_layout.addWidget(_sep_text_line)
+        _sep_text_lbl = QLabel("⚠  Undocumented feature")
+        _sep_text_lbl.setStyleSheet("color: #999; font-style: italic; font-size: 8pt;")
+        _sep_text_layout.addWidget(_sep_text_lbl)
+        self._fields['sep_text_undocumented'] = _sep_text
+
+        _sep_dialog = QWidget()
+        _sep_dialog.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        _sep_dialog_layout = QVBoxLayout(_sep_dialog)
+        _sep_dialog_layout.setContentsMargins(0, 8, 0, 2)
+        _sep_dialog_layout.setSpacing(3)
+        _sep_dialog_line = QFrame()
+        _sep_dialog_line.setFrameShape(QFrame.Shape.HLine)
+        _sep_dialog_line.setStyleSheet("color: #bbb;")
+        _sep_dialog_layout.addWidget(_sep_dialog_line)
+        _sep_dialog_lbl = QLabel("⚠  Undocumented feature")
+        _sep_dialog_lbl.setStyleSheet("color: #999; font-style: italic; font-size: 8pt;")
+        _sep_dialog_layout.addWidget(_sep_dialog_lbl)
+        self._fields['sep_dialog_undocumented'] = _sep_dialog
+
+        self._fields['requires'] = QLineEdit()
+        self._fields['requires'].setPlaceholderText("Requirement expression")
+        self._fields['requires'].textChanged.connect(self._on_field_changed)
+
+        self._fields['visible_requires'] = QLineEdit()
+        self._fields['visible_requires'].setPlaceholderText("Visibility requirement expression")
+        self._fields['visible_requires'].textChanged.connect(self._on_field_changed)
+
         # Deprecated (read-only display)
         self._fields['authbit'] = QLineEdit()
         self._fields['authbit'].setPlaceholderText("(deprecated)")
@@ -411,14 +480,19 @@ class PropertyPanel(QWidget):
 
         # Add all rows (hidden by default)
         fl.addRow("Name:", self._fields['name'])
+        fl.addRow(self._fields['sep_dialog_undocumented'])
         fl.addRow("Display Name:", self._fields['display_name'])
         fl.addRow("Command:", self._fields['command'])
-        fl.addRow("Title Text:", self._fields['text'])
+        fl.addRow(self._fields['sep_text_undocumented'])
+        fl.addRow("Text:", self._fields['text'])
         fl.addRow("Comment:", self._fields['comment_text'])
         fl.addRow("Icon:", self._fields['icon'])
         fl.addRow("Badge(s):", self._fields['badge'])
         fl.addRow("Power Ready:", self._fields['power_ready'])
         fl.addRow("Power Owned:", self._fields['power_owned'])
+        fl.addRow(self._fields['sep_undocumented'])
+        fl.addRow("Requires:", self._fields['requires'])
+        fl.addRow("Visible Requires:", self._fields['visible_requires'])
         fl.addRow("Authbit:", self._fields['authbit'])
         fl.addRow("Reward Token:", self._fields['reward_token'])
         fl.addRow("Store Product:", self._fields['store_product'])
@@ -462,8 +536,15 @@ class PropertyPanel(QWidget):
         )
 
         if isinstance(node, Menu):
-            self._show_fields('name')
+            main = self.window()
+            show_undoc = getattr(main, '_show_undocumented', False)
+            fields = ['name']
+            if show_undoc:
+                fields += ['sep_undocumented', 'requires', 'visible_requires']
+            self._show_fields(*fields)
             self._fields['name'].setText(node.name)
+            self._fields['requires'].setText(node.requires)
+            self._fields['visible_requires'].setText(node.visible_requires)
 
         elif isinstance(node, Option):
             self._show_fields('display_name', 'command')
@@ -471,14 +552,14 @@ class PropertyPanel(QWidget):
             self._fields['command'].setPlainText(node.command)
 
         elif isinstance(node, LockedOption):
-            fields = ['display_name', 'command', 'icon', 'badge',
-                      'power_ready', 'power_owned']
-            if node.authbit:
-                fields.append('authbit')
-            if node.reward_token:
-                fields.append('reward_token')
-            if node.store_product:
-                fields.append('store_product')
+            main = self.window()
+            show_undoc = getattr(main, '_show_undocumented', False)
+            show_deprecated = getattr(main, '_show_deprecated', False)
+            fields = ['display_name', 'command', 'icon', 'badge', 'power_ready', 'power_owned']
+            if show_undoc:
+                fields += ['sep_undocumented', 'requires', 'visible_requires']
+            if show_deprecated:
+                fields += ['authbit', 'reward_token', 'store_product']
             self._show_fields(*fields)
             self._fields['display_name'].setText(node.display_name)
             self._fields['command'].setPlainText(node.command)
@@ -486,12 +567,23 @@ class PropertyPanel(QWidget):
             self._fields['badge'].line_edit.setText(node.badge)
             self._fields['power_ready'].line_edit.setText(node.power_ready)
             self._fields['power_owned'].line_edit.setText(node.power_owned)
+            self._fields['requires'].setText(node.requires)
+            self._fields['visible_requires'].setText(node.visible_requires)
             self._fields['authbit'].setText(node.authbit)
             self._fields['reward_token'].setText(node.reward_token)
             self._fields['store_product'].setText(node.store_product)
 
+        elif isinstance(node, Dialog):
+            self._show_fields('sep_dialog_undocumented', 'display_name', 'command')
+            self._fields['display_name'].setText(node.display_name)
+            self._fields['command'].setPlainText(node.command)
+
         elif isinstance(node, Title):
             self._show_fields('text')
+            self._fields['text'].setText(node.text)
+
+        elif isinstance(node, Text):
+            self._show_fields('sep_text_undocumented', 'text')
             self._fields['text'].setText(node.text)
 
         elif isinstance(node, Divider):
@@ -520,6 +612,8 @@ class PropertyPanel(QWidget):
 
         if isinstance(node, Menu):
             node.name = self._fields['name'].text()
+            node.requires = self._fields['requires'].text()
+            node.visible_requires = self._fields['visible_requires'].text()
         elif isinstance(node, Option):
             node.display_name = self._fields['display_name'].text()
             node.command = self._fields['command'].toPlainText()
@@ -530,10 +624,17 @@ class PropertyPanel(QWidget):
             node.badge = self._fields['badge'].line_edit.text()
             node.power_ready = self._fields['power_ready'].line_edit.text()
             node.power_owned = self._fields['power_owned'].line_edit.text()
+            node.requires = self._fields['requires'].text()
+            node.visible_requires = self._fields['visible_requires'].text()
             node.authbit = self._fields['authbit'].text()
             node.reward_token = self._fields['reward_token'].text()
             node.store_product = self._fields['store_product'].text()
+        elif isinstance(node, Dialog):
+            node.display_name = self._fields['display_name'].text()
+            node.command = self._fields['command'].toPlainText()
         elif isinstance(node, Title):
+            node.text = self._fields['text'].text()
+        elif isinstance(node, Text):
             node.text = self._fields['text'].text()
         elif isinstance(node, Comment):
             node.text = self._fields['comment_text'].toPlainText()
@@ -563,6 +664,11 @@ class MainWindow(QMainWindow):
         self.config_path = self._get_config_path()
         self._load_config()
 
+        self._show_undocumented = self.config.getboolean('UI', 'show_undocumented', fallback=False)
+        self._show_deprecated   = self.config.getboolean('UI', 'show_deprecated',   fallback=False)
+        self._text_btn   = None
+        self._dialog_btn = None
+
         game_dir = self.config.get('DEFAULT', 'game_directory', fallback='')
         if game_dir:
             self._check_menus_directory(game_dir)
@@ -587,6 +693,33 @@ class MainWindow(QMainWindow):
     def _save_config(self):
         with open(self.config_path, 'w') as f:
             self.config.write(f)
+
+    def _save_ui_option(self, key: str, value: bool):
+        if not self.config.has_section('UI'):
+            self.config.add_section('UI')
+        self.config.set('UI', key, str(value))
+        self._save_config()
+
+    def _toggle_undocumented(self, checked: bool):
+        self._show_undocumented = checked
+        self._save_ui_option('show_undocumented', checked)
+        if self._text_btn:
+            self._text_btn.setVisible(checked)
+        if self._dialog_btn:
+            self._dialog_btn.setVisible(checked)
+        self._refresh_prop_panel()
+
+    def _toggle_deprecated(self, checked: bool):
+        self._show_deprecated = checked
+        self._save_ui_option('show_deprecated', checked)
+        self._refresh_prop_panel()
+
+    def _refresh_prop_panel(self):
+        items = self.tree.selectedItems()
+        if items:
+            self.prop_panel.load_node(items[0])
+        else:
+            self.prop_panel.clear()
 
     def _set_game_directory(self):
         current = self.config.get('DEFAULT', 'game_directory', fallback='')
@@ -664,10 +797,18 @@ class MainWindow(QMainWindow):
             ("+ Title", self._add_title),
             ("+ Divider", self._add_divider),
             ("+ Comment", self._add_comment),
+            ("⚠ + Dialog", self._add_dialog),
+            ("⚠ + Text", self._add_text),
         ]:
             btn = QPushButton(label)
             btn.setStyleSheet(btn_style)
             btn.clicked.connect(fn)
+            if label == "⚠ + Dialog":
+                self._dialog_btn = btn
+                btn.setVisible(self._show_undocumented)
+            elif label == "⚠ + Text":
+                self._text_btn = btn
+                btn.setVisible(self._show_undocumented)
             btn_row.addWidget(btn)
 
         left_layout.addLayout(btn_row)
@@ -719,6 +860,19 @@ class MainWindow(QMainWindow):
         import_menu = mb.addMenu("&Import")
         import_menu.addAction(self._action("&Import Menu from File...", self._import_menu, "Ctrl+I"))
 
+        options_menu = mb.addMenu("&Options")
+        self._undoc_action = QAction("Show &Undocumented Features", self)
+        self._undoc_action.setCheckable(True)
+        self._undoc_action.setChecked(self._show_undocumented)
+        self._undoc_action.triggered.connect(self._toggle_undocumented)
+        options_menu.addAction(self._undoc_action)
+
+        self._deprecated_action = QAction("Show &Deprecated Fields", self)
+        self._deprecated_action.setCheckable(True)
+        self._deprecated_action.setChecked(self._show_deprecated)
+        self._deprecated_action.triggered.connect(self._toggle_deprecated)
+        options_menu.addAction(self._deprecated_action)
+
     def _build_toolbar(self):
         tb = self.addToolBar("Main")
         tb.setMovable(False)
@@ -763,16 +917,16 @@ class MainWindow(QMainWindow):
         for comment in mnu.root_comments:
             item = self._build_tree_item(comment)
             self.tree.addTopLevelItem(item)
-        if mnu.root_menu:
-            # If the first child of the root Menu is a Title, hoist it to root level for display
-            children = mnu.root_menu.children
+        for menu in mnu.root_menus:
+            # If the first child of a root Menu is a Title, hoist it to root level for display
+            children = menu.children
             if children and isinstance(children[0], Title):
                 title_item = self._build_tree_item(children[0])
                 self.tree.addTopLevelItem(title_item)
-                # Remove it from the menu's children so it isn't shown twice
-                mnu.root_menu.children = children[1:]
-            root_item = self._build_tree_item(mnu.root_menu)
+                menu.children = children[1:]
+            root_item = self._build_tree_item(menu)
             self.tree.addTopLevelItem(root_item)
+        if mnu.root_menus:
             self.tree.expandAll()
         self.tree.model().blockSignals(False)
 
@@ -812,7 +966,7 @@ class MainWindow(QMainWindow):
                 if pending_title:
                     menu_node.children.insert(0, pending_title)
                     pending_title = None
-                mnu.root_menu = menu_node
+                mnu.root_menus.append(menu_node)
         return mnu
 
     def _item_to_node(self, item: QTreeWidgetItem) -> MnuNode:
@@ -1001,11 +1155,17 @@ class MainWindow(QMainWindow):
     def _add_title(self):
         self._insert_node(Title(text="New Title"))
 
+    def _add_text(self):
+        self._insert_node(Text(text="New Text"))
+
     def _add_divider(self):
         self._insert_node(Divider())
 
     def _add_comment(self):
         self._insert_node(Comment(text="New comment"))
+
+    def _add_dialog(self):
+        self._insert_node(Dialog(display_name="New Dialog", command=""))
 
     def _show_tree_context_menu(self, pos):
         menu = QMenu(self)
@@ -1017,6 +1177,10 @@ class MainWindow(QMainWindow):
         add_menu.addAction("Title",         self._add_title)
         add_menu.addAction("Divider",       self._add_divider)
         add_menu.addAction("Comment",       self._add_comment)
+        if self._show_undocumented:
+            add_menu.addSeparator()
+            add_menu.addAction("⚠ Dialog",  self._add_dialog)
+            add_menu.addAction("⚠ Text",    self._add_text)
 
         menu.addSeparator()
 
@@ -1039,11 +1203,14 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Import Error", f"Failed to read file:\n{e}")
             return
-        if not mnu.root_menu:
+        if not mnu.root_menus:
             QMessageBox.warning(self, "Import Error",
-                "The selected file has no root menu to import.")
+                "The selected file has no root menus to import.")
             return
-        self._insert_node(mnu.root_menu)
+        self._push_undo_snapshot()
+        for menu in mnu.root_menus:
+            self._insert_node_inner(menu)
+        self._field_session_active = False
 
     def _delete_selected(self):
         items = self.tree.selectedItems()
@@ -1085,7 +1252,7 @@ class MainWindow(QMainWindow):
 
         # Create default structure
         root = Menu(name="NewMenu")
-        mnu = MnuFile(root_menu=root)
+        mnu = MnuFile(root_menus=[root])
         self._build_tree_from_mnu(mnu)
         # Leave modified = False so opening a file right away doesn't prompt
 
