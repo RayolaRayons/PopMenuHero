@@ -491,12 +491,12 @@ class PropertyPanel(QWidget):
         fl.addRow("Badge(s):", self._fields['badge'])
         fl.addRow("Power Ready:", self._fields['power_ready'])
         fl.addRow("Power Owned:", self._fields['power_owned'])
-        fl.addRow(self._fields['sep_undocumented'])
-        fl.addRow("Requires:", self._fields['requires'])
-        fl.addRow("Visible Requires:", self._fields['visible_requires'])
         fl.addRow("Authbit:", self._fields['authbit'])
         fl.addRow("Reward Token:", self._fields['reward_token'])
         fl.addRow("Store Product:", self._fields['store_product'])
+        fl.addRow(self._fields['sep_undocumented'])
+        fl.addRow("Requires:", self._fields['requires'])
+        fl.addRow("Visible Requires:", self._fields['visible_requires'])
 
         self._hide_all()
 
@@ -557,10 +557,10 @@ class PropertyPanel(QWidget):
             show_undoc = getattr(main, '_show_undocumented', False)
             show_deprecated = getattr(main, '_show_deprecated', False)
             fields = ['display_name', 'command', 'icon', 'badge', 'power_ready', 'power_owned']
-            if show_undoc:
-                fields += ['sep_undocumented', 'requires', 'visible_requires']
             if show_deprecated:
                 fields += ['authbit', 'reward_token', 'store_product']
+            if show_undoc:
+                fields += ['sep_undocumented', 'requires', 'visible_requires']
             self._show_fields(*fields)
             self._fields['display_name'].setText(node.display_name)
             self._fields['command'].setPlainText(node.command)
@@ -718,6 +718,17 @@ class MainWindow(QMainWindow):
         self._save_ui_option('show_deprecated', checked)
         self._refresh_prop_panel()
 
+    def _show_about(self):
+        QMessageBox.about(self, "About PopMenu Hero",
+            "PopMenu Hero\n\n"
+            "Created 2026 by RayolaRayons\n\n"
+            "For the latest version go to the forum or the GitHub repository."
+        )
+
+    def _open_url(self, url: str):
+        import webbrowser
+        webbrowser.open(url)
+
     def _refresh_prop_panel(self):
         items = self.tree.selectedItems()
         if items:
@@ -847,6 +858,8 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self._action("&Save", self._save_file, "Ctrl+S"))
         file_menu.addAction(self._action("Save &As...", self._save_file_as, "Ctrl+Shift+S"))
         file_menu.addSeparator()
+        file_menu.addAction(self._action("&Import Menu from File...", self._import_menu, "Ctrl+I"))
+        file_menu.addSeparator()
         file_menu.addAction(self._action("Set &Game Directory...", self._set_game_directory))
         file_menu.addSeparator()
         file_menu.addAction(self._action("E&xit", self.close, "Alt+F4"))
@@ -868,9 +881,6 @@ class MainWindow(QMainWindow):
         edit_menu.addAction(self._action("Expand &All", self.tree.expandAll))
         edit_menu.addAction(self._action("&Collapse All", self.tree.collapseAll))
 
-        import_menu = mb.addMenu("&Import")
-        import_menu.addAction(self._action("&Import Menu from File...", self._import_menu, "Ctrl+I"))
-
         options_menu = mb.addMenu("&Options")
         self._undoc_action = QAction("Show &Undocumented Features", self)
         self._undoc_action.setCheckable(True)
@@ -883,6 +893,23 @@ class MainWindow(QMainWindow):
         self._deprecated_action.setChecked(self._show_deprecated)
         self._deprecated_action.triggered.connect(self._toggle_deprecated)
         options_menu.addAction(self._deprecated_action)
+
+        help_menu = mb.addMenu("&Help")
+        help_menu.addAction(self._action("&About", self._show_about))
+        links_menu = help_menu.addMenu("&Links")
+        links_menu.addAction(self._action("Homecoming &Forum",
+            lambda: self._open_url("https://forums.homecomingservers.com/topic/63727-popmenu-hero-gui-editor-for-popmenus/")))
+        links_menu.addAction(self._action("City of &Data 2.0",
+            lambda: self._open_url("https://cod.uberguy.net")))
+        links_menu.addAction(self._action("PopMenu &Wiki",
+            lambda: self._open_url("https://homecoming.wiki/wiki/Popmenu_(Slash_Command)")))
+        links_menu.addAction(self._action("PopMenus: The &What, Why and How",
+            lambda: self._open_url("https://forums.homecomingservers.com/topic/6701-popmenus-the-what-why-and-how/")))
+        help_menu.addSeparator()
+        help_menu.addAction(self._action("&Latest Version",
+            lambda: self._open_url("https://github.com/RayolaRayons/PopMenuHero/releases/latest")))
+        help_menu.addAction(self._action("&GitHub",
+            lambda: self._open_url("https://github.com/RayolaRayons/PopMenuHero")))
 
     def _build_toolbar(self):
         tb = self.addToolBar("Main")
