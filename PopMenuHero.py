@@ -5,6 +5,7 @@ A graphical editor for .mnu files with drag-and-drop tree view and property pane
 
 import sys
 import os
+import copy
 import configparser
 from pathlib import Path
 from PyQt6.QtWidgets import (
@@ -668,6 +669,9 @@ class MainWindow(QMainWindow):
         self._show_deprecated   = self.config.getboolean('UI', 'show_deprecated',   fallback=False)
         self._text_btn   = None
         self._dialog_btn = None
+        self._clipboard  = None
+        self._copy_action  = None
+        self._paste_action = None
 
         game_dir = self.config.get('DEFAULT', 'game_directory', fallback='')
         if game_dir:
@@ -852,6 +856,13 @@ class MainWindow(QMainWindow):
         self._undo_action.setEnabled(False)
         edit_menu.addAction(self._undo_action)
         edit_menu.addSeparator()
+        self._copy_action = self._action("&Copy", self._copy_node, "Ctrl+C")
+        self._copy_action.setEnabled(False)
+        edit_menu.addAction(self._copy_action)
+        self._paste_action = self._action("&Paste", self._paste_node, "Ctrl+V")
+        self._paste_action.setEnabled(False)
+        edit_menu.addAction(self._paste_action)
+        edit_menu.addSeparator()
         edit_menu.addAction(self._action("&Delete Selected", self._delete_selected, "Delete"))
         edit_menu.addSeparator()
         edit_menu.addAction(self._action("Expand &All", self.tree.expandAll))
@@ -986,6 +997,8 @@ class MainWindow(QMainWindow):
             self.prop_panel.load_node(items[0])
         else:
             self.prop_panel.clear()
+        if self._copy_action:
+            self._copy_action.setEnabled(bool(items))
 
     def _on_tree_changed(self, *args):
         self.mark_modified()
@@ -1184,8 +1197,16 @@ class MainWindow(QMainWindow):
 
         menu.addSeparator()
 
+        has_sel = bool(self.tree.selectedItems())
+        copy_action = menu.addAction("Copy", self._copy_node)
+        copy_action.setEnabled(has_sel)
+        paste_action = menu.addAction("Paste", self._paste_node)
+        paste_action.setEnabled(self._clipboard is not None)
+
+        menu.addSeparator()
+
         delete_action = menu.addAction("Delete Selected", self._delete_selected)
-        delete_action.setEnabled(bool(self.tree.selectedItems()))
+        delete_action.setEnabled(has_sel)
 
         menu.exec(self.tree.viewport().mapToGlobal(pos))
 
@@ -1235,6 +1256,56 @@ class MainWindow(QMainWindow):
             self.tree.takeTopLevelItem(idx)
         self.prop_panel.clear()
         self.mark_modified()
+
+    # --- Copy / Paste ---
+
+    def _copy_node(self):
+        items = self.tree.selectedItems()
+        if not items:
+            return
+        node = self._item_to_node(items[0])
+        self._clipboard = copy.deepcopy(node)
+        if self._paste_action:
+            self._paste_action.setEnabled(True)
+
+    def _paste_node(self):
+        if self._clipboard is None:
+            return
+        node = copy.deepcopy(self._clipboard)
+        self._push_undo_snapshot()
+
+        if isinstance(node, Menu):
+            sel = self.tree.selectedItems()
+            if sel and sel[0].parent() is None:
+                # Pasting next to a root-level item → new root menu
+                node.name = self._make_unique_root_name(node.name)
+                idx = self.tree.indexOfTopLevelItem(sel[0])
+                item = self._build_tree_item(node)
+                self.tree.insertTopLevelItem(idx + 1, item)
+                self.tree.setCurrentItem(item)
+                self.mark_modified()
+            else:
+                self._insert_node_inner(node)
+        else:
+            self._insert_node_inner(node)
+
+        self._field_session_active = False
+
+    def _make_unique_root_name(self, name: str) -> str:
+        existing = {
+            self.tree.topLevelItem(i).data(0, Qt.ItemDataRole.UserRole).name
+            for i in range(self.tree.topLevelItemCount())
+            if isinstance(self.tree.topLevelItem(i).data(0, Qt.ItemDataRole.UserRole), Menu)
+        }
+        if name not in existing:
+            return name
+        base = name.rstrip('0123456789')
+        counter = 1
+        while True:
+            candidate = f"{base}{counter}"
+            if candidate not in existing:
+                return candidate
+            counter += 1
 
     # --- File Operations ---
 
